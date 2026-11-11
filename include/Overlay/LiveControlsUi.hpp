@@ -57,8 +57,8 @@ struct LiveControlsUiState {
     int scopeStabilize=80;   // xr_scope_stabilize, percent history in a moving scope lens (0 = off)
     int nvidiaReflex = cvr::reflex::DefaultMode;
     int fpsCap=1;            // xr_fps_cap: the game held to the headset's refresh rate (Framegen/Framegen.hpp)
-    int lobby=1;             // xr_lobby: the main menu shown in its world (Lobby/MenuLobby.hpp)
-    int lobbyAmbient=1;      // xr_lobby_ambient: the lobby's ambience plays (Lobby/MenuLobby.hpp)
+    int lobby=0;             // xr_lobby: the main menu shown in its world (Lobby/MenuLobby.hpp)
+    int lobbyAmbient=0;      // xr_lobby_ambient: the lobby's ambience plays (Lobby/MenuLobby.hpp)
     cvr::vrui::Settings overlay{};
     int xr3DofMovement;
     int xrFirstLaunch;      // not a control -- carried so a UI save does not drop the key

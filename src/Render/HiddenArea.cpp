@@ -33,7 +33,7 @@ struct BarrierRecord { uint32_t node; int32_t side; uint32_t before, after, subr
 }
 extern "C" {
 // Effective settings, also writable by live tests (an ini edit overwrites them again).
-__declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_HiddenAreaEnabled{0};
+__declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_HiddenAreaEnabled{1};
 __declspec(dllexport) std::atomic<float> CyberpunkVR_HiddenAreaRadius{115.0f};
 // Only clears inside this render-graph node (work RVA) are masked; 0 = any node. Default:
 // SetRenderTargetsGBuffer. The hologram, planar-reflection and water depths are square as well.
@@ -169,8 +169,7 @@ std::shared_ptr<const std::vector<Rect>> RectsFor(int side,UINT w,UINT h);
 // before the barrier that ends its depth writes, or after the one that starts them.
 bool ClearHidden(ID3D12GraphicsCommandList* list,ID3D12Resource* resource,int side,ClearFn clear,float depth) {
     // Engine stereo puts both eyes in one target; the mask is laid out for one eye per target.
-    if(!clear || side<0 || side>1 || !CyberpunkVR_HiddenAreaEnabled.load(std::memory_order_relaxed) || GetMenuMode() ||
-       cvr::engine_stereo::Enabled())return false;
+    if(!clear || side<0 || side>1 || !CyberpunkVR_HiddenAreaEnabled.load(std::memory_order_relaxed) || GetMenuMode())return false;
     const auto d=resource->GetDesc();
     const DXGI_FORMAT format=DsvFormat(d.Format);
     if(format==DXGI_FORMAT_UNKNOWN || d.Dimension!=D3D12_RESOURCE_DIMENSION_TEXTURE2D || d.SampleDesc.Count!=1)return false;
@@ -193,9 +192,8 @@ bool ToNear(uint32_t node){return CyberpunkVR_HiddenAreaSky.load(std::memory_ord
 
 // The eye's runtime FOV and the window the engine renders for it, in tangents: the symmetric frustum,
 // or the eye's own off-centre window under the asymmetric projection (Runtimes/AsymmetricProjection.hpp).
-bool Frustum(int side,Fov& fov,Fov& rendered) {
-    // MAIN is side 0; which physical eye it is follows the stereo assignment.
-    const int eye=(side==0)==(CyberpunkVR_MainIsRightEye!=0)?1:0;
+bool FrustumForEye(int eye,Fov& fov,Fov& rendered) {
+    if(eye<0 || eye>1)return false;
     XrFovf xf{};
     if(!OpenXRManager::Get().GetCurrentEyeFov(eye,&xf))return false;
     fov={std::tan(xf.angleLeft),std::tan(xf.angleRight),std::tan(xf.angleUp),std::tan(xf.angleDown)};
@@ -204,8 +202,6 @@ bool Frustum(int side,Fov& fov,Fov& rendered) {
     if(cvr::projection::Active() && OpenXRManager::Get().GetAsymmetricEyeWindows(&asym)) {
         const auto& w=asym.eye[eye];
         rendered={w.l,w.r,w.u,w.d};
-        // The inner guard renders the other eye's side on purpose: screen-space effects need it to agree
-        // between the eyes. Keep the ellipse off it by the same amount, or the mask takes it away again.
         const float guard=std::fmin(1.0f,std::fmax(0.0f,std::isfinite(CyberpunkVR_AsymInnerGuard)?CyberpunkVR_AsymInnerGuard:0.0f));
         XrFovf other{};
         if(guard>0 && OpenXRManager::Get().GetCurrentEyeFov(1-eye,&other)) {
@@ -220,10 +216,38 @@ bool Frustum(int side,Fov& fov,Fov& rendered) {
     rendered={-tanX,tanX,tanY,-tanY};
     return true;
 }
+
+bool Frustum(int side,Fov& fov,Fov& rendered) {
+    const int eye=(side==0)==(CyberpunkVR_MainIsRightEye!=0)?1:0;
+    return FrustumForEye(eye,fov,rendered);
+}
 // Patched shaders skip the pixels outside a slightly larger ellipse, so whatever they leave out
 // lies inside the hidden area with this much of the radius to spare for filters reading neighbours.
 constexpr float ShaderMargin=0.02f;
 void PublishShaderEllipse(int side) {
+    if(cvr::engine_stereo::Enabled()) {
+        for(int eye=0;eye<2;++eye) {
+            Fov fov,rendered;
+            if(!FrustumForEye(eye,fov,rendered))continue;
+            const float r=CyberpunkVR_HiddenAreaRadius.load(std::memory_order_relaxed)/100.0f*(1.0f+ShaderMargin);
+            float scales[4];
+            if(rendered.left==-rendered.right && rendered.down==-rendered.up) {
+                const float tanX=rendered.right, tanY=rendered.up;
+                const float s[4]{tanX/-fov.left,tanX/fov.right,tanY/fov.up,tanY/-fov.down};
+                for(int i=0;i<4;++i)scales[i]=(s[i]/r)*(s[i]/r);
+            } else {
+                auto& c=ellipseCache[eye];
+                if(c.radius!=r || !SameFov(c.rendered,rendered) || !SameFov(c.fov,fov)) {
+                    c.radius=r;c.rendered=rendered;c.fov=fov;
+                    c.ok=ShaderEllipseScales(fov,r*100.0f,rendered,c.scales);
+                }
+                if(!c.ok)continue;
+                for(int i=0;i<4;++i)scales[i]=c.scales[i];
+            }
+            shaders::Publish(eye,scales);
+        }
+        return;
+    }
     Fov fov,rendered;
     if(!Frustum(side,fov,rendered))return;
     const float r=CyberpunkVR_HiddenAreaRadius.load(std::memory_order_relaxed)/100.0f*(1.0f+ShaderMargin);
@@ -248,9 +272,30 @@ void PublishShaderEllipse(int side) {
 }
 
 std::shared_ptr<const std::vector<Rect>> RectsFor(int side,UINT w,UINT h) {
+    const float radius=CyberpunkVR_HiddenAreaRadius.load(std::memory_order_relaxed);
+    if(cvr::engine_stereo::Enabled() && w>=(h*3u)/2u) {
+        const uint32_t eyeW=w/2u;
+        const uint32_t eyeH=h;
+        Fov fovL,rendL,fovR,rendR;
+        if(!FrustumForEye(0,fovL,rendL) || !FrustumForEye(1,fovR,rendR))return {};
+        std::lock_guard lock(mutex);
+        auto& c=cache[0];
+        if(!c.rects || c.width!=w || c.height!=h || c.radius!=radius || !SameFov(c.rendered,rendL) || !SameFov(c.fov,fovL)) {
+            auto rectsL=BuildRects(fovL,radius,eyeW,eyeH,rendL,Cell,Margin);
+            auto rectsR=BuildRects(fovR,radius,eyeW,eyeH,rendR,Cell,Margin);
+            for(auto& r:rectsR) {
+                r.left+=int32_t(eyeW);
+                r.right+=int32_t(eyeW);
+            }
+            std::vector<Rect> merged=std::move(rectsL);
+            merged.insert(merged.end(),rectsR.begin(),rectsR.end());
+            c={w,h,radius,rendL,fovL,std::make_shared<const std::vector<Rect>>(std::move(merged))};
+            lastHidden[0].store(float(100.0*Coverage(*c.rects,w,h)),std::memory_order_relaxed);
+        }
+        return c.rects;
+    }
     Fov fov,rendered;
     if(!Frustum(side,fov,rendered))return {};
-    const float radius=CyberpunkVR_HiddenAreaRadius.load(std::memory_order_relaxed);
     std::lock_guard lock(mutex);
     auto& c=cache[side];
     if(!c.rects || c.width!=w || c.height!=h || c.radius!=radius || !SameFov(c.rendered,rendered) || !SameFov(c.fov,fov)) {
@@ -326,9 +371,10 @@ void AfterDepthClear(ID3D12GraphicsCommandList* list,D3D12_CPU_DESCRIPTOR_HANDLE
     // The view's own scene depth: a full clear to the reverse-Z far plane, a 32-bit depth format and
     // the eye's aspect. Shadow maps are 16-bit or a different shape; menus show the eye image flat.
     const float aspect=g_launcherHeight>0?float(g_launcherWidth)/float(g_launcherHeight):1.0f;
+    const float expectedAspect=(cvr::engine_stereo::Enabled() && w>=(h*3u)/2u)?(2.0f*aspect):aspect;
     const uint32_t only=CyberpunkVR_HiddenAreaNode.load(std::memory_order_relaxed);
     bool masked=on && side>=0 && side<=1 && !rects && depth==0.0f && SceneDepthFormat(format) && w>=256 && h>=256 &&
-        std::fabs(float(w)/float(h)-aspect)<=.02f*aspect && (!only || only==node) && !GetMenuMode();
+        std::fabs(float(w)/float(h)-expectedAspect)<=.05f*expectedAspect && (!only || only==node) && !GetMenuMode();
     if(masked) {
         const auto cover=RectsFor(side,w,h);
         masked=cover && !cover->empty();

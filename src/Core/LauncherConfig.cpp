@@ -208,7 +208,7 @@ void EnsureLiveControlFileExists() {
     fprintf(file, "xr_local_shadow_reuse=0\n");
     // Only frame-matched, per-eye depth is submitted. Synthetic frames omit it
     // until their interpolation backend supplies corresponding depth.
-    fprintf(file, "xr_depth_submit=1\n");
+    fprintf(file, "xr_depth_submit=0\n");
     fprintf(file, "xr_movement_control=0\n");
     fprintf(file, "xr_disable_mouse_y=1\n");
     fprintf(file, "xr_xinput_hook=1\n");

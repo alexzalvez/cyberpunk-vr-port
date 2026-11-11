@@ -433,7 +433,7 @@
         {
           "name": "DLSS_NewSharpness",
           "type": "float",
-          "value": 0.1500000059,
+          "value": 0.0,
           "default_value": 0.0,
           "min_value": 0.0,
           "max_value": 1.0,
@@ -593,8 +593,8 @@
           "name": "TextureQuality",
           "type": "string_list",
           "is_dynamic": false,
-          "value": "High",
-          "index": 2,
+          "value": "Medium",
+          "index": 1,
           "default_index": 2,
           "values": [
             "Low",
@@ -627,27 +627,27 @@
         {
           "name": "RayTracedReflections",
           "type": "bool",
-          "value": true,
+          "value": false,
           "default_value": false
         },
         {
           "name": "RayTracedSunShadows",
           "type": "bool",
-          "value": true,
+          "value": false,
           "default_value": false
         },
         {
           "name": "RayTracedLocalShadows",
           "type": "bool",
-          "value": true,
+          "value": false,
           "default_value": false
         },
         {
           "name": "RayTracedLighting",
           "type": "string_list",
           "is_dynamic": false,
-          "value": "Ultra",
-          "index": 2,
+          "value": "Off",
+          "index": 0,
           "default_index": 0,
           "values": [
             "Off",
@@ -1561,8 +1561,8 @@
           "name": "Anisotropy",
           "type": "int_list",
           "is_dynamic": false,
-          "value": 16,
-          "index": 3,
+          "value": 8,
+          "index": 2,
           "default_index": 0,
           "values": [
             1,
@@ -1588,8 +1588,8 @@
           "name": "LocalShadowsQuality",
           "type": "string_list",
           "is_dynamic": false,
-          "value": "Medium",
-          "index": 2,
+          "value": "Low",
+          "index": 1,
           "default_index": 0,
           "values": [
             "Off",
@@ -1640,8 +1640,8 @@
           "name": "VolumetricFogResolution",
           "type": "string_list",
           "is_dynamic": false,
-          "value": "Medium",
-          "index": 1,
+          "value": "Low",
+          "index": 0,
           "default_index": 1,
           "values": [
             "Low",
@@ -1682,8 +1682,8 @@
           "name": "ScreenSpaceReflectionsQuality",
           "type": "string_list",
           "is_dynamic": false,
-          "value": "Medium",
-          "index": 2,
+          "value": "Low",
+          "index": 1,
           "default_index": 1,
           "values": [
             "Off",
@@ -1711,8 +1711,8 @@
           "name": "AmbientOcclusion",
           "type": "string_list",
           "is_dynamic": false,
-          "value": "Medium",
-          "index": 2,
+          "value": "Low",
+          "index": 1,
           "default_index": 1,
           "values": [
             "Off",
@@ -1749,8 +1749,8 @@
           "name": "MirrorQuality",
           "type": "string_list",
           "is_dynamic": false,
-          "value": "Medium",
-          "index": 1,
+          "value": "Low",
+          "index": 0,
           "default_index": 0,
           "values": [
             "Low",

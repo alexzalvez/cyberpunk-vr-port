@@ -56,7 +56,7 @@ extern float GetWorldScale();
 // FinishFrame (xrEndFrame) once per frame and never skips the cycle.
 // The invariant is that the pose in the projection
 // layer is the one the image was rendered against -- not one located at submit time.
-extern "C" __declspec(dllexport) int CyberpunkVR_XrPaceByRuntime = 1;
+extern "C" __declspec(dllexport) int CyberpunkVR_XrPaceByRuntime = 0;
 
 // The hand filter's speed, in UEVR's units: the follow fraction per second, multiplied by delta time
 // at the point of use. 15.0 is their default (slider 0.01..30), which at 52 fps is 15 * 0.019 = 0.29 --
@@ -1126,19 +1126,16 @@ DWORD OpenXRManager::FrameThreadMain() {
                 // thread did not actually wait on it during the fresh submit path. So do
                 // not trust the event by itself: only proceed when the serial changed.
                 while (!m_stopFrameThread.load(std::memory_order_relaxed)) {
-                    const DWORD waitRes = WaitForSingleObject(m_monoPresentEvent, 10);
-                    {
+                    const DWORD waitRes = WaitForSingleObject(m_monoPresentEvent, 20);
+                    if (waitRes == WAIT_OBJECT_0) {
                         std::lock_guard<std::mutex> lock(m_presentMutex);
                         latestMonoSerial = m_monoCapturedFrame.serial;
-                    }
-                    if (latestMonoSerial != 0 && latestMonoSerial != m_lastSubmittedSerial) {
-                        break;
+                        if (latestMonoSerial != 0 && latestMonoSerial != m_lastSubmittedSerial) {
+                            break;
+                        }
                     }
                     if (!m_sessionRunning.load(std::memory_order_relaxed)) {
                         break;
-                    }
-                    if (waitRes == WAIT_TIMEOUT) {
-                        Sleep(1);
                     }
                 }
                 if (latestMonoSerial == 0 || latestMonoSerial == m_lastSubmittedSerial) {

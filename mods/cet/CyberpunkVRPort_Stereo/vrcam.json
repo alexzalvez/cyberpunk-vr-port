@@ -15,8 +15,8 @@
     "create it. Deleting this file makes the plugin fall back to the legacy 'vrcam' /",
     "'vrcam_feed' names, i.e. the pre-catalogue behaviour."
   ],
-  "component": "vrcam_2560x2560",
-  "virtualCamera": "vrcam_feed_2560x2560",
+  "component": "vrcam_2048x2048",
+  "virtualCamera": "vrcam_feed_2048x2048",
   "_components_comment": [
     "Every VRCAM component that exists on the player entity. The launcher offers exactly this",
     "list and nothing else, so a name here without an imported component would select a view",

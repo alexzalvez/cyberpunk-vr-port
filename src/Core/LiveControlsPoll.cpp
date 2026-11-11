@@ -482,8 +482,8 @@ void PollLiveControls() {
     int scopeStabilize=cvr::optics::source::GetStabilize();
     int nvidiaReflex=cvr::reflex::DefaultMode;
     int fpsCap=1;
-    int lobby=1;
-    int lobbyAmbient=1;
+    int lobby=0;
+    int lobbyAmbient=0;
     auto overlay=cvr::vrui::GetSettings();
     float xrPitchSign = 1.0f;
     float xrPitchScale = 1.35f;
@@ -503,7 +503,7 @@ void PollLiveControls() {
     int xrRuntime = 0;
     // Per-eye, frame-labelled depth snapshots. Missing/invalid/synthetic depth
     // is omitted from that projection layer rather than borrowed from another frame.
-    int xrDepthSubmit = 1;
+    int xrDepthSubmit = 0;
     int xrMovementControl = g_liveControls.xrMovementControl;
     int xrDisableMouseY = g_liveControls.xrDisableMouseY;
     int xrXInputHook = g_liveControls.xrXInputHook != 0 ? g_liveControls.xrXInputHook : 1;

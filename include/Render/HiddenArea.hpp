@@ -16,7 +16,7 @@ struct D3D12_BARRIER_GROUP;   // enhanced barriers; the full type comes with the
 
 namespace cvr::hidden_area {
 struct Settings {
-    int enabled=0;
+    int enabled=1;
     float radius=115;   // visible ellipse radius, percent of each half-FOV
     bool operator==(const Settings&) const = default;
 };

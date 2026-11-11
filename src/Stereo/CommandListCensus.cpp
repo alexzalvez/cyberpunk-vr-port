@@ -80,9 +80,9 @@
 #include "MinHook.h"
 #include "Utils/LogThrottle.hpp"
 #include "Stereo/StereoInternal.hpp"
+#include "Stereo/EngineStereo.hpp"
 #include "Stereo/EngineRvas.hpp"
 #include "Stereo/DetourRegistry.hpp"
-#include "Stereo/StereoInternal.hpp"
 #include "Stereo/EngineRvas.hpp"
 #include "Stereo/StereoPairProbe.hpp"
 #include "Stereo/SinglePass.hpp"
@@ -2068,6 +2068,18 @@ void STDMETHODCALLTYPE hk_ClearDepthStencilView(ID3D12GraphicsCommandList* self,
     cvr::stereo::copy_windows::UnknownDraw(self);
     const CommandListVtableHook* e = command_list_hook_entry(self);
     if (!e || !e->draw_original) return;
+
+    // Fast-path: En modo EngineStereo sin sondas de diagnostico activas, despachar directo a DirectX 12
+    if (cvr::engine_stereo::Enabled() && !cvr::stereo::probe::internalCommands &&
+        !CyberpunkVR_DrawCensus && !CyberpunkVR_StereoFamilyObserve.load(std::memory_order_relaxed) &&
+        CyberpunkVR_SinglePass.load(std::memory_order_relaxed) == 0) {
+        if (cvr::cascades::SkipDraw(self)) return;
+        const auto base = reinterpret_cast<uintptr_t>(g_exe_base);
+        const uint32_t node = (base && t_current_node_work > base) ? uint32_t(t_current_node_work - base) : 0;
+        cvr::vrs::PrepareDraw(self, node, t_view_side, e->shading_rate_original, e->shading_image_original);
+        e->draw_original(self, vtx, inst, sv, si);
+        return;
+    }
     if(!cvr::stereo::probe::internalCommands && cvr::stereo::retained_geometry::Active())cvr::stereo::retained_geometry::Flush(self,7);
     cvr::stereo::early_depth::Unsupported(self,2);
     if(cvr::cascades::SkipDraw(self))return;
@@ -2158,6 +2170,25 @@ static void lens_mask(ID3D12GraphicsCommandList* self,const CommandListVtableHoo
     if (!e || !e->drawidx_original) return;
     if(cvr::stereo::probe::internalCommands){cvr::stereo::copy_windows::UnknownDraw(self);
         cvr::stereo::target_handoff::Draw(self);cvr::stereo::target_access::Shader(self,true);e->drawidx_original(self,idx,inst,si,bv,sinst);return;}
+
+    // Fast-path: En modo EngineStereo sin sondas de diagnostico activas, despachar directo a DirectX 12
+    if (cvr::engine_stereo::Enabled() && !CyberpunkVR_DrawCensus && !CyberpunkVR_CascadeCensus &&
+        !CyberpunkVR_SightAxisProbe && !CyberpunkVR_PsoProbe &&
+        !CyberpunkVR_StereoFamilyObserve.load(std::memory_order_relaxed) &&
+        CyberpunkVR_NativeStereoProbeState.load(std::memory_order_relaxed) != 1 &&
+        CyberpunkVR_SinglePass.load(std::memory_order_relaxed) == 0) {
+        if (cvr::cascades::SkipDraw(self)) return;
+        const auto base = reinterpret_cast<uintptr_t>(g_exe_base);
+        const uint32_t node = (base && t_current_node_work > base) ? uint32_t(t_current_node_work - base) : 0;
+        cvr::vrs::PrepareDraw(self, node, t_view_side, e->shading_rate_original, e->shading_image_original);
+        {
+            cvr::optics::FullRateDraw fullRate(self, t_current_pso, e->shading_rate_original);
+            e->drawidx_original(self, idx, inst, si, bv, sinst);
+            lens_velocity(self, e, idx, inst, si, bv, sinst);
+            lens_mask(self, e, idx, inst, si, bv, sinst);
+        }
+        return;
+    }
     if(CyberpunkVR_NativeStereoProbeState.load(std::memory_order_relaxed)!=1 && cvr::stereo::retained_geometry::Active())
         cvr::stereo::retained_geometry::Flush(self,10);
     if(cvr::cascades::SkipDraw(self))return;

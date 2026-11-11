@@ -17,7 +17,7 @@
 extern void Log(const char*,...);
 
 extern "C" {
-__declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_SinglePass{1};   // on (measured: docs/vr-render-optimization-20261104.md)
+__declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_SinglePass{0};   // on (measured: docs/vr-render-optimization-20261104.md)
 __declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_SinglePassNode{0x33DDA4};   // RenderElements; 0 = every node
 __declspec(dllexport) std::atomic<uint64_t> CyberpunkVR_SinglePassCounts[10]{};
 // 1: while left draws are kept, the engine's state calls are not sent on: the next draw (or command that reads them)

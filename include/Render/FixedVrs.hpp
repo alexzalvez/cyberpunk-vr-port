@@ -8,8 +8,8 @@
 
 namespace cvr::vrs {
 struct Settings {
-    int mode=0; // Off, 2x2, 4x4 (with a 2x2 transition).
-    float width=70, height=65, offsetX=0, offsetY=0;
+    int mode=2; // Off, 2x2, 4x4 (with a 2x2 transition).
+    float width=60, height=60, offsetX=0, offsetY=0;
     bool operator==(const Settings&) const = default;
 };
 struct Status {

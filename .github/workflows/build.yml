@@ -1,0 +1,80 @@
+name: Build Cyberpunk VR Mod
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & Package (Release x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+
+      - name: Compile Mod
+        run: |
+          cmake --build build --config Release --parallel
+
+      - name: Package Distribution
+        shell: pwsh
+        run: |
+          # Localizar la DLL compilada dentro del árbol de salida
+          $dllCandidates = @(
+            "build\bin\red4ext\plugins\cyberpunkvrport\Release\cyberpunkvrport.dll",
+            "build\bin\red4ext\plugins\cyberpunkvrport\cyberpunkvrport.dll",
+            "build\Release\cyberpunkvrport.dll"
+          )
+          
+          $foundDll = $null
+          foreach ($cand in $dllCandidates) {
+            if (Test-Path $cand) {
+              $foundDll = $cand
+              Write-Host "DLL encontrada: $foundDll" -ForegroundColor Green
+              break
+            }
+          }
+
+          $targetDir = "build\bin\red4ext\plugins\cyberpunkvrport\Release"
+          if ($foundDll -and -not (Test-Path "$targetDir\cyberpunkvrport.dll")) {
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+            Copy-Item $foundDll "$targetDir\cyberpunkvrport.dll" -Force
+          }
+
+          try {
+            pwsh scripts/build_dist.ps1 -BuildDir "build" -Zip -Force
+          } catch {
+            Write-Warning "build_dist.ps1 requiere empaquetado de contingencia: $_"
+            $distManual = "dist\CyberpunkVRPort-0.2.3"
+            New-Item -ItemType Directory -Path "$distManual\red4ext\plugins\cyberpunkvrport" -Force | Out-Null
+            if ($foundDll) {
+              Copy-Item $foundDll "$distManual\red4ext\plugins\cyberpunkvrport\cyberpunkvrport.dll" -Force
+            }
+            if (Test-Path "mods") {
+              Copy-Item "mods\*" "$distManual\" -Recurse -Force
+            }
+            Compress-Archive -Path "$distManual\*" -DestinationPath "dist\CyberpunkVRPort-0.2.3.zip" -Force
+          }
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CyberpunkVRPort-Release-x64
+          path: |
+            dist/*.zip
+            build/**/cyberpunkvrport.dll
+          if-no-files-found: error
