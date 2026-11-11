@@ -481,7 +481,7 @@ void PollLiveControls() {
     int osr=CyberpunkVR_Afw==cvr::afw::kModeOsr;
     int scopeStabilize=cvr::optics::source::GetStabilize();
     int nvidiaReflex=cvr::reflex::DefaultMode;
-    int fpsCap=1;
+    int fpsCap = 0;
     int lobby=0;
     int lobbyAmbient=0;
     auto overlay=cvr::vrui::GetSettings();

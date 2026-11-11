@@ -123,7 +123,7 @@ void SetSettings(Settings s) {
     s=Normalize(s);std::lock_guard lock(mutex);
     // The rate map is laid out for one eye per target; engine stereo has both in one. The setting itself is
     // kept, so it is back when the mode is.
-    const bool on=s.mode!=0;
+    const bool on=s.mode!=0 && !engine_stereo::Enabled();
     if(enabled.load(std::memory_order_relaxed)!=on)recordingEpoch.fetch_add(1,std::memory_order_release);
     enabled.store(on,std::memory_order_relaxed);
     if(on)everEnabled.store(true,std::memory_order_relaxed);
@@ -154,12 +154,9 @@ void Invalidate(ID3D12GraphicsCommandList* list){if(stereo::probe::internalComma
 void Pipeline(ID3D12GraphicsCommandList* list,ID3D12PipelineState* pso){Edit(list,[&](State& s){SetPipeline(s,pso);});}
 void Viewports(ID3D12GraphicsCommandList* list,UINT n,const D3D12_VIEWPORT* v){Edit(list,[&](State& s){
     s.width=s.height=0;
-    if(n!=1 || !v || v->TopLeftY!=0 || !(v->Width>=64 && v->Width<=16384 && v->Height>=64 && v->Height<=16384) ||
+    if(n!=1 || !v || v->TopLeftX!=0 || v->TopLeftY!=0 || !(v->Width>=64 && v->Width<=16384 && v->Height>=64 && v->Height<=16384) ||
        float(UINT(v->Width))!=v->Width || float(UINT(v->Height))!=v->Height)return;
-    const bool sbs=engine_stereo::Enabled();
-    if(v->TopLeftX!=0 && (!sbs || v->TopLeftX!=v->Width))return;
-    const UINT fullW=sbs?(v->TopLeftX!=0 || v->Width<v->Height*1.5f?UINT(v->Width*2):UINT(v->Width)):UINT(v->Width);
-    s.width=fullW;s.height=UINT(v->Height);
+    s.width=UINT(v->Width);s.height=UINT(v->Height);
 });}
 void Targets(ID3D12GraphicsCommandList* list,UINT count,bool depth){Edit(list,[&](State& s){s.targets=count;s.depth=depth;});}
 void ShadingRate(ID3D12GraphicsCommandList* list,D3D12_SHADING_RATE rate,const D3D12_SHADING_RATE_COMBINER* c){Edit(list,[&](State& s){
@@ -167,7 +164,7 @@ void ShadingRate(ID3D12GraphicsCommandList* list,D3D12_SHADING_RATE rate,const D
 });}
 void ShadingImage(ID3D12GraphicsCommandList* list,ID3D12Resource* image){Edit(list,[&](State& s){s.image=image;});}
 
-void PrepareDraw(ID3D12GraphicsCommandList* base,uint32_t node,int eye,RateFn setRate,ImageFn setImage) {
+void PrepareDraw(ID3D12GraphicsCommandList* base,uint32_t node,int eye,RateFn setRate,ImageFn setImage) { (void)base;(void)node;(void)eye;(void)setRate;(void)setImage; return;
     if(stereo::probe::internalCommands || !everEnabled.load(std::memory_order_relaxed))return;
     auto* state=FindState(base);if(!state || !state->known)return;auto& s=*state;
     if(!enabled.load(std::memory_order_relaxed) || s.recordingEpoch!=recordingEpoch.load(std::memory_order_acquire) || node!=0x33DDA4 || eye<0 || eye>1 || !setRate || !setImage){RestoreState(base,s);return;}

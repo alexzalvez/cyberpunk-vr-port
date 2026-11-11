@@ -225,7 +225,10 @@ HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* swapChain, UINT syncInte
         timing[0].fetch_add(1, std::memory_order_relaxed);
     }
     const uint64_t finishStart = PresentTicks();
-    {std::lock_guard submissionLock(cvr::camera::ImageSubmissionMutex());cvr::framegen::FinishGpuFrame();}
+    if (cvr::framegen::MetricsEnabled()) {
+        std::lock_guard submissionLock(cvr::camera::ImageSubmissionMutex());
+        cvr::framegen::FinishGpuFrame();
+    }
     uint64_t sectionStart = PresentTicks();
     CyberpunkVR_PresentTiming[2].fetch_add(sectionStart - finishStart, std::memory_order_relaxed);
     auto section = [&sectionStart](unsigned index) {
@@ -234,28 +237,30 @@ HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* swapChain, UINT syncInte
         sectionStart = now;
     };
     cvr::gpu::CollectCommandResources();
-    cvr::gpu::profile::Poll();
-    cvr::gpu::scene_profile::Poll();
-    cvr::stereo::pair_probe::Poll();
     cvr::cascades::Poll();
-    if(CyberpunkVR_PreparationRequest.load() &&
-       (CyberpunkVR_EarlyDepthRequest.load() || cvr::stereo::retained_geometry::Active()) &&
-       CyberpunkVR_NativeStereoProbeState.load()!=1){
-        CyberpunkVR_NativeStereoProbeRequest=1;CyberpunkVR_GeometryPacketRequest=1;
+    if (cvr::stereo::retained_geometry::Active() || CyberpunkVR_PreparationRequest.load(std::memory_order_relaxed)) {
+        cvr::gpu::profile::Poll();
+        cvr::gpu::scene_profile::Poll();
+        cvr::stereo::pair_probe::Poll();
+        if(CyberpunkVR_PreparationRequest.load() &&
+           (CyberpunkVR_EarlyDepthRequest.load() || cvr::stereo::retained_geometry::Active()) &&
+           CyberpunkVR_NativeStereoProbeState.load()!=1){
+            CyberpunkVR_NativeStereoProbeRequest=1;CyberpunkVR_GeometryPacketRequest=1;
+        }
+        if(CyberpunkVR_PreparationCameraTrace.load() && CyberpunkVR_PreparationRequest.load() &&
+            CyberpunkVR_SinglePassTraceState.load()!=1 && !CyberpunkVR_SinglePassTraceRequest.load())
+            CyberpunkVR_SinglePassTraceRequest=CyberpunkVR_PreparationRequest.load();
+        cvr::stereo::trace::FrameBoundary();
+        cvr::stereo::early_depth::BeforeFrameBoundary();
+        cvr::stereo::preparation::FrameBoundary();
+        cvr::stereo::early_depth::FrameBoundary();
+        cvr::stereo::PollCpuCollector();
+        cvr::stereo::packets::FrameBoundary(cvr::stereo::early_depth::RunTracking());
+        cvr::stereo::native_probe::FrameBoundary(cvr::stereo::early_depth::RunTracking() || cvr::stereo::prepared_pair::NeedsNativeBindings() ||
+            CyberpunkVR_PreparedPairRequest.load(std::memory_order_relaxed)!=0);
+        cvr::stereo::gpu_probe::Poll();
+        cvr::stereo::early_depth::Poll();
     }
-    if(CyberpunkVR_PreparationCameraTrace.load() && CyberpunkVR_PreparationRequest.load() &&
-        CyberpunkVR_SinglePassTraceState.load()!=1 && !CyberpunkVR_SinglePassTraceRequest.load())
-        CyberpunkVR_SinglePassTraceRequest=CyberpunkVR_PreparationRequest.load();
-    cvr::stereo::trace::FrameBoundary();
-    cvr::stereo::early_depth::BeforeFrameBoundary();
-    cvr::stereo::preparation::FrameBoundary();
-    cvr::stereo::early_depth::FrameBoundary();
-    cvr::stereo::PollCpuCollector();
-    cvr::stereo::packets::FrameBoundary(cvr::stereo::early_depth::RunTracking());
-    cvr::stereo::native_probe::FrameBoundary(cvr::stereo::early_depth::RunTracking() || cvr::stereo::prepared_pair::NeedsNativeBindings() ||
-        CyberpunkVR_PreparedPairRequest.load(std::memory_order_relaxed)!=0);
-    cvr::stereo::gpu_probe::Poll();
-    cvr::stereo::early_depth::Poll();
 
     // Bind the overlay to the game's window on first sight.
     //
@@ -295,12 +300,9 @@ HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* swapChain, UINT syncInte
 
     // Publish the presented size for the scene-depth picker and re-open the choice for the
     // next frame: the pick must be per-frame, not a session maximum (see the OM hook).
-    if (swapChain) {
-        DXGI_SWAP_CHAIN_DESC scd{};
-        if (SUCCEEDED(swapChain->GetDesc(&scd))) {
-            g_presentWidth.store(scd.BufferDesc.Width, std::memory_order_relaxed);
-            g_presentHeight.store(scd.BufferDesc.Height, std::memory_order_relaxed);
-        }
+    if (hasDesc) {
+        g_presentWidth.store(desc.BufferDesc.Width, std::memory_order_relaxed);
+        g_presentHeight.store(desc.BufferDesc.Height, std::memory_order_relaxed);
     }
     // Reopen the scene-depth choice only when the current pick has gone quiet. Resetting
     // unconditionally is what let it alternate between MAIN's two same-size depth buffers.
@@ -352,8 +354,7 @@ HRESULT STDMETHODCALLTYPE HookedPresent(IDXGISwapChain* swapChain, UINT syncInte
         DumpDredOnce(swapChain, hr);
     }
 
-    static uint64_t presentLogCounter = 0;
-    if (hr != S_OK || ((++presentLogCounter % 600) == 1)) {
+    if (hr != S_OK) {
         HWND foreground = GetForegroundWindow();
         RECT clientRect{};
         RECT windowRect{};

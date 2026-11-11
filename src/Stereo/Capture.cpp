@@ -879,8 +879,10 @@ void STDMETHODCALLTYPE hk_OMSetRenderTargets(
         }
     }
     original(self, count, use, use_contig, depth);
-    cvr::stereo::target_handoff::Targets(self,count,use,use_contig,depth);
-    cvr::stereo::target_access::Targets(self,count,use,use_contig,depth);
+    if (cvr::stereo::retained_geometry::Active()) {
+        cvr::stereo::target_handoff::Targets(self,count,use,use_contig,depth);
+        cvr::stereo::target_access::Targets(self,count,use,use_contig,depth);
+    }
     if (subbed) {
         CVR_DIAGNOSTIC(++CyberpunkVR_DebugOwnTargetSubs);
         if (g_own_target)
@@ -1425,37 +1427,28 @@ static void CountBarriers(UINT count,const D3D12_RESOURCE_BARRIER* barriers){
 }
 void STDMETHODCALLTYPE hk_ResourceBarrier(ID3D12GraphicsCommandList* self,
         UINT count, const D3D12_RESOURCE_BARRIER* barriers) {
-    CountBarriers(count,barriers);
     cvr::menu_surface::Barriers(self,count,barriers);
     const CommandListVtableHook* e = command_list_hook_entry(self);
     PFN_ResourceBarrier orig = e ? e->barrier_original : nullptr;
-    if(!cvr::stereo::probe::internalCommands && cvr::stereo::retained_geometry::Active())cvr::stereo::retained_geometry::BeforeBarriers(self,count,barriers);
-    if(barriers && !cvr::stereo::probe::internalCommands && (cvr::stereo::early_depth::Drawing() || cvr::stereo::early_depth::MaterialPending()))for(UINT i=0;i<count;++i){
-        const auto& b=barriers[i];
-        if(b.Type==D3D12_RESOURCE_BARRIER_TYPE_ALIASING){
-            cvr::stereo::early_depth::InstanceBarrier(self,nullptr);
-            cvr::stereo::early_depth::InstanceAlias(self,b.Aliasing.pResourceBefore,b.Aliasing.pResourceAfter);
-        }else if(b.Type==D3D12_RESOURCE_BARRIER_TYPE_TRANSITION){
-            cvr::stereo::early_depth::InstanceBarrier(self,b.Transition.pResource);
-            if(b.Transition.StateAfter&(D3D12_RESOURCE_STATE_COPY_DEST|D3D12_RESOURCE_STATE_UNORDERED_ACCESS|D3D12_RESOURCE_STATE_STREAM_OUT))
-                cvr::stereo::early_depth::InstanceWrite(self,b.Transition.pResource);
+    const bool spActive = cvr::stereo::retained_geometry::Active();
+    if(!cvr::stereo::probe::internalCommands && spActive)cvr::stereo::retained_geometry::BeforeBarriers(self,count,barriers);
+    cvr::cascades::BeforeBarriers(self,count,barriers);
+    if (orig) {
+        orig(self, count, barriers);
+        if (spActive) {
+            cvr::stereo::target_handoff::Barriers(self,count,barriers);
+            cvr::stereo::target_access::Barriers(self,count,barriers);
         }
     }
-    cvr::cascades::BeforeBarriers(self,count,barriers);
-    const auto hiddenBase=reinterpret_cast<uintptr_t>(g_exe_base);
-    const uint32_t hiddenNode=hiddenBase && t_current_node_work>hiddenBase?uint32_t(t_current_node_work-hiddenBase):0;
-    if(e && e->cleardsv_original)cvr::hidden_area::BeforeBarriers(self,count,barriers,t_view_side,hiddenNode,e->cleardsv_original);
-    if (orig){const auto barrierStart=BarrierClock();orig(self, count, barriers);
-        if(!cvr::stereo::probe::internalCommands)CountBarrierTime(barrierStart);
-        if(e->cleardsv_original)cvr::hidden_area::AfterBarriers(self,count,barriers,t_view_side,hiddenNode,e->cleardsv_original);cvr::stereo::target_handoff::Barriers(self,count,barriers);
-        cvr::stereo::target_access::Barriers(self,count,barriers);}
-    cvr::stereo::buffer_read::Barriers(self,count,barriers);
-    cvr::stereo::texture_read::Barriers(self,count,barriers);
-    cvr::optics::probe::StageBarriers(self,count,barriers);
+    if (spActive) {
+        cvr::stereo::buffer_read::Barriers(self,count,barriers);
+        cvr::stereo::texture_read::Barriers(self,count,barriers);
+        cvr::optics::probe::StageBarriers(self,count,barriers);
+    }
     if(cvr::stereo::probe::internalCommands)return;
     cvr::optics::camera::Barriers(self,count,barriers);
     cvr::cascades::Barriers(count,barriers);
-    cvr::stereo::constants::RegisteredBarriers(self,count,barriers);
+    if (cvr::stereo::constants::RegisteredTracking()) cvr::stereo::constants::RegisteredBarriers(self,count,barriers);
     // Gated on the same demand as the snapshot, NOT on the mirror window alone. This hook is
     // where t_mirror_src_state is refined (below): the OM bind seeds it as RENDER_TARGET and
     // every later transition of that target is tracked here, so the inline copy can name the

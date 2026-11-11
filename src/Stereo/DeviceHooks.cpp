@@ -552,8 +552,7 @@ static void STDMETHODCALLTYPE Hook_ExecuteCommandLists(
     const auto caller=reinterpret_cast<uintptr_t>(_ReturnAddress());
     const auto original=command_queue_original_execute(self);if(!original)return;
     PollStreamingPlaced();
-    NoteSubmitVideoMemory(self);
-    cvr::list_audit::Execute(self,n,lists);
+    if (cvr::framegen::MetricsEnabled()) NoteSubmitVideoMemory(self);
     cvr::stereo::constants::ObserveQueueApi(self);
     CVR_DIAGNOSTIC(CyberpunkVR_DebugExecTotal = g_exec_total.fetch_add(n, std::memory_order_relaxed) + n);
     // Do the single 11on12 copy+present only once the game actually SUBMITS the
@@ -571,85 +570,89 @@ static void STDMETHODCALLTYPE Hook_ExecuteCommandLists(
         }
     }
     {
-        std::lock_guard submissionLock(cvr::camera::ImageSubmissionMutex());
-        if(self==g_game_queue)cvr::framegen::BeforeGameCommands(self);
-        cvr::foveated::BeforeSubmit(self,n,lists);
-        auto resources = cvr::gpu::PrepareCommandResources(n, lists);
-        auto sceneProfile=cvr::gpu::scene_profile::BeforeSubmit(n,lists);
-        cvr::stereo::gpu_probe::BeforeSubmit(self,n,lists);
-        cvr::stereo::texture_read::BeforeSubmit(self,n,lists);
-        cvr::stereo::buffer_read::BeforeSubmit(self,n,lists);
-        cvr::stereo::native_recording::BeforeSubmit(self,n,lists,caller);
-        cvr::stereo::target_handoff::BeforeSubmit(self,n,lists);
-        cvr::stereo::submission_frontier::ObserveSubmit(self,n,lists);
-        const bool retainedSerialize=!cvr::stereo::probe::internalCommands && cvr::stereo::retained_geometry::Active() &&
-            cvr::stereo::retained_geometry::BeforeSubmit(self,n,lists);
-        const bool pairedSerialize=!cvr::stereo::probe::internalCommands && cvr::stereo::paired_geometry::Active() &&
-            cvr::stereo::paired_geometry::BeforeSubmit(self,n,lists);
-        const bool serialize=retainedSerialize || pairedSerialize;
-        const UINT currentBoundary=retainedSerialize && serialize?
-            cvr::stereo::retained_geometry::CurrentBoundary(self,n,lists):0;
-        cvr::stereo::retained_geometry::OrderedExecution(self,n,lists,serialize);
-        cvr::stereo::early_depth::BeforeSubmit(self,n,lists);
-        auto geometrySnapshots=cvr::stereo::geometry_snapshots::BeforeSubmit(n,lists);
-        cvr::stereo::descriptors::BeforeSubmit(n,lists);
-        {
-            // Do not hold the queue observer's ordering mutex while acquiring
-            // CommandResources: its submission path can itself signal fences.
-            std::unique_lock order(cvr::stereo::constants::RegisteredQueueOrderMutex(),std::defer_lock);
-            if(cvr::stereo::constants::RegisteredTracking() || CyberpunkVR_PreparationAllStages.load(std::memory_order_relaxed))order.lock();
-            if(order.owns_lock())cvr::stereo::constants::RefreshRegisteredFences();
-            const UINT prefix=currentBoundary?currentBoundary:n;
-            cvr::stereo::constants::SubmitRegistered(self,prefix,lists);
-            cvr::stereo::constants::BeforeSubmit(prefix,lists);
-            cvr::stereo::preparation::SubmitLists(self,prefix,lists,order.owns_lock());
-            if(serialize && lists)for(UINT i=0;i<n;++i){
-                cvr::optics::camera::Execute(self,1,lists+i,original);
-                if(currentBoundary && i+1==currentBoundary){
-                    cvr::stereo::texture_read::Submitted(self,currentBoundary,lists);
-                    cvr::stereo::buffer_read::Submitted(self,currentBoundary,lists);
-                    cvr::stereo::native_recording::Submitted(self,currentBoundary,lists);
-                    cvr::stereo::target_handoff::Submitted(self,currentBoundary,lists);
-                    const bool relock=order.owns_lock();if(relock)order.unlock();
-                    cvr::stereo::retained_geometry::CurrentPrefixExecuted(currentBoundary);
-                    cvr::stereo::retained_geometry::Submitted(self,currentBoundary,lists);
-                    cvr::stereo::retained_geometry::SubmitCurrent(self);
-                    if(relock)order.lock();
-                    cvr::stereo::constants::SubmitRegistered(self,n-currentBoundary,lists+currentBoundary);
-                    cvr::stereo::constants::BeforeSubmit(n-currentBoundary,lists+currentBoundary);
-                    cvr::stereo::preparation::SubmitLists(self,n-currentBoundary,lists+currentBoundary,order.owns_lock());
+        const bool spActive = cvr::stereo::retained_geometry::Active() || cvr::stereo::paired_geometry::Active() ||
+                              cvr::stereo::constants::RegisteredTracking() || CyberpunkVR_PreparationAllStages.load(std::memory_order_relaxed);
+        if (!spActive) {
+            std::lock_guard submissionLock(cvr::camera::ImageSubmissionMutex());
+            if(self==g_game_queue && cvr::framegen::MetricsEnabled()) cvr::framegen::BeforeGameCommands(self);
+            auto resources = cvr::gpu::PrepareCommandResources(n, lists);
+            cvr::optics::camera::Execute(self, n, lists, original);
+            cvr::gpu::SubmitCommandResources(self, std::move(resources));
+            cvr::camera::CommitImagePoseLists(self, n, lists);
+            if(cvr::framegen::CaptureInputsEnabled()) cvr::framegen::Submitted(self, n, lists);
+            cvr::menu_surface::Submitted(self, n, lists);
+        } else {
+            std::lock_guard submissionLock(cvr::camera::ImageSubmissionMutex());
+            if(self==g_game_queue)cvr::framegen::BeforeGameCommands(self);
+            auto resources = cvr::gpu::PrepareCommandResources(n, lists);
+            auto sceneProfile=cvr::gpu::scene_profile::BeforeSubmit(n,lists);
+            cvr::stereo::gpu_probe::BeforeSubmit(self,n,lists);
+            cvr::stereo::texture_read::BeforeSubmit(self,n,lists);
+            cvr::stereo::buffer_read::BeforeSubmit(self,n,lists);
+            cvr::stereo::native_recording::BeforeSubmit(self,n,lists,caller);
+            cvr::stereo::target_handoff::BeforeSubmit(self,n,lists);
+            cvr::stereo::submission_frontier::ObserveSubmit(self,n,lists);
+            const bool retainedSerialize=!cvr::stereo::probe::internalCommands && cvr::stereo::retained_geometry::Active() &&
+                cvr::stereo::retained_geometry::BeforeSubmit(self,n,lists);
+            const bool pairedSerialize=!cvr::stereo::probe::internalCommands && cvr::stereo::paired_geometry::Active() &&
+                cvr::stereo::paired_geometry::BeforeSubmit(self,n,lists);
+            const bool serialize=retainedSerialize || pairedSerialize;
+            const UINT currentBoundary=retainedSerialize && serialize?
+                cvr::stereo::retained_geometry::CurrentBoundary(self,n,lists):0;
+            cvr::stereo::retained_geometry::OrderedExecution(self,n,lists,serialize);
+            cvr::stereo::early_depth::BeforeSubmit(self,n,lists);
+            auto geometrySnapshots=cvr::stereo::geometry_snapshots::BeforeSubmit(n,lists);
+            cvr::stereo::descriptors::BeforeSubmit(n,lists);
+            {
+                std::unique_lock order(cvr::stereo::constants::RegisteredQueueOrderMutex(),std::defer_lock);
+                if(cvr::stereo::constants::RegisteredTracking() || CyberpunkVR_PreparationAllStages.load(std::memory_order_relaxed))order.lock();
+                if(order.owns_lock())cvr::stereo::constants::RefreshRegisteredFences();
+                const UINT prefix=currentBoundary?currentBoundary:n;
+                cvr::stereo::constants::SubmitRegistered(self,prefix,lists);
+                cvr::stereo::constants::BeforeSubmit(prefix,lists);
+                cvr::stereo::preparation::SubmitLists(self,prefix,lists,order.owns_lock());
+                if(serialize && lists)for(UINT i=0;i<n;++i){
+                    cvr::optics::camera::Execute(self,1,lists+i,original);
+                    if(currentBoundary && i+1==currentBoundary){
+                        cvr::stereo::texture_read::Submitted(self,currentBoundary,lists);
+                        cvr::stereo::buffer_read::Submitted(self,currentBoundary,lists);
+                        cvr::stereo::native_recording::Submitted(self,currentBoundary,lists);
+                        cvr::stereo::target_handoff::Submitted(self,currentBoundary,lists);
+                        const bool relock=order.owns_lock();if(relock)order.unlock();
+                        cvr::stereo::retained_geometry::CurrentPrefixExecuted(currentBoundary);
+                        cvr::stereo::retained_geometry::Submitted(self,currentBoundary,lists);
+                        cvr::stereo::retained_geometry::SubmitCurrent(self);
+                        if(relock)order.lock();
+                        cvr::stereo::constants::SubmitRegistered(self,n-currentBoundary,lists+currentBoundary);
+                        cvr::stereo::constants::BeforeSubmit(n-currentBoundary,lists+currentBoundary);
+                        cvr::stereo::preparation::SubmitLists(self,n-currentBoundary,lists+currentBoundary,order.owns_lock());
+                    }
                 }
+                else {
+                    cvr::optics::camera::Execute(self,n,lists,original);
+                }
+                cvr::stereo::texture_read::Submitted(self,n-currentBoundary,lists?lists+currentBoundary:nullptr);
+                cvr::stereo::buffer_read::Submitted(self,n-currentBoundary,lists?lists+currentBoundary:nullptr);
+                cvr::stereo::native_recording::Submitted(self,n-currentBoundary,lists?lists+currentBoundary:nullptr);
+                cvr::stereo::target_handoff::Submitted(self,n-currentBoundary,lists?lists+currentBoundary:nullptr);
             }
-            else {
-                const uint64_t driverStart=EclTicks();
-                CyberpunkVR_EclTiming[3].fetch_add(driverStart-eclStart,std::memory_order_relaxed);
-                cvr::optics::camera::Execute(self,n,lists,original);
-                const uint64_t driverEnd=EclTicks();
-                CyberpunkVR_EclTiming[4].fetch_add(driverEnd-driverStart,std::memory_order_relaxed);
-                CyberpunkVR_EclTiming[5].fetch_sub(driverEnd,std::memory_order_relaxed);   // + end, below
+            if(currentBoundary)cvr::stereo::retained_geometry::CurrentSuffixExecuted(n-currentBoundary);
+            if(!cvr::stereo::probe::internalCommands && cvr::stereo::retained_geometry::Active()){
+                cvr::stereo::retained_geometry::Submitted(self,n,lists);
+                cvr::stereo::retained_geometry::SubmitCurrent(self);
             }
-            cvr::stereo::texture_read::Submitted(self,n-currentBoundary,lists?lists+currentBoundary:nullptr);
-            cvr::stereo::buffer_read::Submitted(self,n-currentBoundary,lists?lists+currentBoundary:nullptr);
-            cvr::stereo::native_recording::Submitted(self,n-currentBoundary,lists?lists+currentBoundary:nullptr);
-            cvr::stereo::target_handoff::Submitted(self,n-currentBoundary,lists?lists+currentBoundary:nullptr);
+            if(!cvr::stereo::probe::internalCommands && cvr::stereo::paired_geometry::Active())
+                cvr::stereo::paired_geometry::Submitted(self,n,lists);
+            if(lists)for(UINT i=0;i<n;++i)cvr::stereo::material_binding::Reset(static_cast<ID3D12GraphicsCommandList*>(lists[i]));
+            cvr::gpu::SubmitCommandResources(self, std::move(resources));
+            cvr::stereo::geometry_snapshots::Submitted(self,std::move(geometrySnapshots));
+            cvr::gpu::scene_profile::Submitted(self,std::move(sceneProfile));
+            cvr::stereo::gpu_probe::Submitted(self,n,lists);
+            cvr::stereo::early_depth::Submitted(self,n,lists);
+            cvr::camera::CommitImagePoseLists(self,n,lists);
+            cvr::framegen::Submitted(self,n,lists);
+            cvr::menu_surface::Submitted(self,n,lists);
         }
-        if(currentBoundary)cvr::stereo::retained_geometry::CurrentSuffixExecuted(n-currentBoundary);
-        if(!cvr::stereo::probe::internalCommands && cvr::stereo::retained_geometry::Active()){
-            cvr::stereo::retained_geometry::Submitted(self,n,lists);
-            cvr::stereo::retained_geometry::SubmitCurrent(self);
-        }
-        if(!cvr::stereo::probe::internalCommands && cvr::stereo::paired_geometry::Active())
-            cvr::stereo::paired_geometry::Submitted(self,n,lists);
-        if(lists)for(UINT i=0;i<n;++i)cvr::stereo::material_binding::Reset(static_cast<ID3D12GraphicsCommandList*>(lists[i]));
-        cvr::gpu::SubmitCommandResources(self, std::move(resources));
-        cvr::stereo::geometry_snapshots::Submitted(self,std::move(geometrySnapshots));
-        cvr::gpu::scene_profile::Submitted(self,std::move(sceneProfile));
-        cvr::stereo::gpu_probe::Submitted(self,n,lists);
-        cvr::stereo::early_depth::Submitted(self,n,lists);
-        cvr::camera::CommitImagePoseLists(self,n,lists);
-        cvr::framegen::Submitted(self,n,lists);
-        cvr::menu_surface::Submitted(self,n,lists);
-        if(!serialize)CyberpunkVR_EclTiming[5].fetch_add(EclTicks(),std::memory_order_relaxed);
     }
     // The game just submitted the list that wrote the vrcam final. That target rests
     // permanently in RENDER_TARGET (never read back -> no RT->read barrier exists),

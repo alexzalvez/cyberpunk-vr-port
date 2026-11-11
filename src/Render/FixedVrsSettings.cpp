@@ -5,7 +5,7 @@
 namespace cvr::vrs {
 Settings Normalize(Settings s) {
     const auto percent=[](float x,float fallback){return std::isfinite(x)?std::clamp(x,20.f,100.f):fallback;};
-    s.mode=std::clamp(s.mode,0,2);s.width=percent(s.width,60);s.height=percent(s.height,60);
+    s.mode=std::clamp(s.mode,0,2);s.width=percent(s.width,70);s.height=percent(s.height,65);
     const float x=(100-s.width)*.5f,y=(100-s.height)*.5f;
     s.offsetX=std::clamp(std::isfinite(s.offsetX)?s.offsetX:0.f,-x,x);
     s.offsetY=std::clamp(std::isfinite(s.offsetY)?s.offsetY:0.f,-y,y);
@@ -28,42 +28,14 @@ std::vector<uint8_t> BuildRates(Settings s,unsigned w,unsigned h,unsigned tile,b
     s=Normalize(s);const unsigned columns=(w+tile-1)/tile,rows=(h+tile-1)/tile;
     std::vector<uint8_t> result(size_t(columns)*rows,D3D12_SHADING_RATE_1X1);
     if(!s.mode)return result;
-    const bool isStereo=(w>=(h*3u)/2u);
-    const float eyeW=isStereo?(float(w)*.5f):float(w);
-    const float eyeH=float(h);
-    const float rx_inner=eyeW*(s.width*.5f)/100.f;
-    const float ry_inner=eyeH*(s.height*.5f)/100.f;
-    const float rx_outer=rx_inner*1.30f;
-    const float ry_outer=ry_inner*1.30f;
-    const float cY=eyeH*(.5f+s.offsetY/100.f);
-    const float cL_x=eyeW*(.5f+s.offsetX/100.f);
-    const float cR_x=isStereo?(eyeW+cL_x):cL_x;
-
-    auto getEyeRate=[&](float centerX,float centerY,float x0,float y0,float x1,float y1) -> uint8_t {
-        const float qx=std::clamp(centerX,x0,x1);
-        const float qy=std::clamp(centerY,y0,y1);
-        const float dx=(qx-centerX)/rx_inner;
-        const float dy=(qy-centerY)/ry_inner;
-        if(dx*dx+dy*dy<=1.0f)return D3D12_SHADING_RATE_1X1;
-        const float dx_out=(qx-centerX)/rx_outer;
-        const float dy_out=(qy-centerY)/ry_outer;
-        if(dx_out*dx_out+dy_out*dy_out<=1.0f)return D3D12_SHADING_RATE_2X2;
-        return uint8_t(s.mode==2 && additional ? D3D12_SHADING_RATE_4X4 : D3D12_SHADING_RATE_2X2);
-    };
-
-    for(unsigned y=0;y<rows;++y) {
-        for(unsigned x=0;x<columns;++x) {
-            const float x0=float(x*tile),y0=float(y*tile);
-            const float x1=float(std::min(w,(x+1)*tile)),y1=float(std::min(h,(y+1)*tile));
-            if(isStereo) {
-                result[size_t(y)*columns+x]=std::min(
-                    getEyeRate(cL_x,cY,x0,y0,x1,y1),
-                    getEyeRate(cR_x,cY,x0,y0,x1,y1)
-                );
-            } else {
-                result[size_t(y)*columns+x]=getEyeRate(cL_x,cY,x0,y0,x1,y1);
-            }
-        }
+    const float left=w*(.5f+(s.offsetX-s.width*.5f)/100),right=left+w*s.width/100;
+    const float top=h*(.5f+(s.offsetY-s.height*.5f)/100),bottom=top+h*s.height/100;
+    // Every tile intersecting the center is fine. A coarse tile never straddles it.
+    for(unsigned y=0;y<rows;++y)for(unsigned x=0;x<columns;++x) {
+        const float x0=float(x*tile),y0=float(y*tile),x1=float(std::min(w,(x+1)*tile)),y1=float(std::min(h,(y+1)*tile));
+        const auto intersects=[&](float marginX,float marginY){return x1>left-marginX && x0<right+marginX && y1>top-marginY && y0<bottom+marginY;};
+        if(intersects(0,0))continue;
+        result[size_t(y)*columns+x]=uint8_t(s.mode==2 && additional && !intersects(w*.08f,h*.08f)?D3D12_SHADING_RATE_4X4:D3D12_SHADING_RATE_2X2);
     }
     return result;
 }

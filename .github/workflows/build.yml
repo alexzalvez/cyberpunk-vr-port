@@ -56,59 +56,14 @@ jobs:
             ~/.cargo/git
           key: ${{ steps.cache-restore.outputs.cache-primary-key }}
 
-      - name: Package Distribution
+      - name: Package Distribution (Flat Directory for Single-Zip Artifact)
         shell: pwsh
         run: |
-          $dllCandidates = @(
-            "build\bin\red4ext\plugins\cyberpunkvrport\Release\cyberpunkvrport.dll",
-            "build\bin\red4ext\plugins\cyberpunkvrport\cyberpunkvrport.dll",
-            "build\Release\cyberpunkvrport.dll",
-            "build\Release\cyberpunkvrport_stereo.dll"
-          )
-
-          $foundDll = $null
-          foreach ($cand in $dllCandidates) {
-            if (Test-Path $cand) {
-              $foundDll = $cand
-              Write-Host "DLL encontrada: $foundDll" -ForegroundColor Green
-              break
-            }
-          }
-
-          if (-not $foundDll) {
-            $search = Get-ChildItem -Path "build" -Recurse -Filter "cyberpunkvrport*.dll" | Select-Object -First 1
-            if ($search) {
-              $foundDll = $search.FullName
-              Write-Host "DLL localizada por busqueda: $foundDll" -ForegroundColor Green
-            }
-          }
-
-          $targetDir = "build\bin\red4ext\plugins\cyberpunkvrport\Release"
-          if ($foundDll -and -not (Test-Path "$targetDir\cyberpunkvrport.dll")) {
-            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-            Copy-Item $foundDll "$targetDir\cyberpunkvrport.dll" -Force
-          }
-
-          try {
-            pwsh scripts/build_dist.ps1 -BuildDir "build" -Zip -Force
-          } catch {
-            Write-Warning "build_dist.ps1 requiere empaquetado de contingencia: $_"
-            $distManual = "dist\CyberpunkVRPort-0.2.3"
-            New-Item -ItemType Directory -Path "$distManual\red4ext\plugins\cyberpunkvrport" -Force | Out-Null
-            if ($foundDll) {
-              Copy-Item $foundDll "$distManual\red4ext\plugins\cyberpunkvrport\cyberpunkvrport.dll" -Force
-            }
-            if (Test-Path "mods") {
-              Copy-Item "mods\*" "$distManual\" -Recurse -Force
-            }
-            Compress-Archive -Path "$distManual\*" -DestinationPath "dist\CyberpunkVRPort-0.2.3.zip" -Force
-          }
+          pwsh scripts/build_dist.ps1 -BuildDir "build" -Force
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CyberpunkVRPort-Release-x64
-          path: |
-            dist/*.zip
-            build/**/cyberpunkvrport*.dll
+          name: CyberpunkVRPort-0.2.3-Optimized
+          path: dist/CyberpunkVRPort-0.2.3/*
           if-no-files-found: error

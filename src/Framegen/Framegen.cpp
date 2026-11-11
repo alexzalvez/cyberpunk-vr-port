@@ -34,7 +34,7 @@ std::atomic<bool> autoPace{true},pacingReady{false};
 std::atomic<int64_t> displayPeriod{0};
 // When xrWaitFrame last returned (NowMs): the phase of the display cycle the frame cap aims at.
 std::atomic<double> displayCycleMs{0};
-std::atomic<bool> fpsCap{true};
+std::atomic<bool> fpsCap{false};
 std::atomic<double> pacingIntervalMs{0};
 std::atomic<bool> resetPacing{true};
 Statistics stats;
@@ -262,6 +262,7 @@ void OnPresentationCycle(bool missedAdjacentFrame) {
     pacingIntervalMs.store(feedback.Observe(NowMs(),double(displayPeriod.load(std::memory_order_relaxed))*2e-6,missedAdjacentFrame),std::memory_order_relaxed);
 }
 void PaceRenderedFrame() {
+    if(!Enabled() && !fpsCap.load(std::memory_order_relaxed)) return;
     struct Timer {HANDLE handle{};double last{};~Timer(){if(handle)CloseHandle(handle);}};
     // The game's Present jobs can run on different workers. A TLS deadline
     // limits each worker independently, allowing the combined stream to run

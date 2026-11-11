@@ -397,25 +397,17 @@ extern "C" __declspec(dllexport) uint64_t CyberpunkVR_DebugP17D0After       = 0;
 extern "C" void CyberpunkVR_GeometryCostTrackViewport(ID3D12GraphicsCommandList*,UINT,const D3D12_VIEWPORT*);
 void STDMETHODCALLTYPE hk_RSSetViewports(
         ID3D12GraphicsCommandList* self, UINT count, const D3D12_VIEWPORT* vps) {
-    // Pass-through. The post-DLSS crop is fixed natively in Detour_RenderRes (view+0x17D0 match-main);
-    // the old render-res-viewport band-aid + per-frame stack-capture diagnostics were removed.
     const CommandListVtableHook* e = command_list_hook_entry(self);
     PFN_RSSetViewports orig = e ? e->viewports_original : nullptr;
     if (orig && !cvr::single_pass::Viewports(self,count,vps)) orig(self, count, vps);
-    cvr::gpu::scene_profile::Viewport(self,count,vps);
-    CyberpunkVR_GeometryCostTrackViewport(self,count,vps);
-    cvr::stereo::pair_probe::Viewports(self,count,vps);
-    cvr::vrs::Viewports(self,count,vps);
     if(CyberpunkVR_NativeStereoProbeState.load(std::memory_order_relaxed)==1)cvr::stereo::native_probe::Viewports(self,count,vps);
 }
 extern "C" void CyberpunkVR_GeometryCostTrackScissor(ID3D12GraphicsCommandList*,UINT,const D3D12_RECT*);
  void STDMETHODCALLTYPE hk_RSSetScissorRects(
         ID3D12GraphicsCommandList* self, UINT count, const D3D12_RECT* rects) {
-    // Pass-through (see hk_RSSetViewports).
     const CommandListVtableHook* e = command_list_hook_entry(self);
     PFN_RSSetScissorRects orig = e ? e->scissor_original : nullptr;
     if (orig && !cvr::single_pass::Scissors(self,count,rects)) orig(self, count, rects);
-    CyberpunkVR_GeometryCostTrackScissor(self,count,rects);
     if(CyberpunkVR_NativeStereoProbeState.load(std::memory_order_relaxed)==1)cvr::stereo::native_probe::Scissors(self,count,rects);
 }
  HRESULT STDMETHODCALLTYPE hk_GfxReset(
@@ -452,20 +444,22 @@ extern "C" void CyberpunkVR_GeometryCostTrackScissor(ID3D12GraphicsCommandList*,
     PFN_GfxReset orig = e ? e->reset_original : nullptr;
     const HRESULT result=orig ? orig(self,alloc,pso) : S_OK;
     if(orig && SUCCEEDED(result)) {
-        cvr::list_audit::ListReset(self,alloc);
         census_pipeline_reset(pso);
-        cvr::stereo::retained_geometry::Reset(self);
-        cvr::stereo::native_recording::Reset(self,reinterpret_cast<uintptr_t>(_ReturnAddress()));
-        cvr::stereo::target_access::Reset(self);
-        cvr::stereo::texture_read::Reset(self);
-        cvr::stereo::buffer_read::Reset(self);
-        cvr::stereo::material_binding::Reset(self);
-        cvr::stereo::source_cbv::Reset(self);
-        cvr::stereo::source_srv::Reset(self);
-        cvr::stereo::families::Reset(self,pso);
-        cvr::stereo::constants::Reset(self);
-        cvr::stereo::constants::ResetRegistered(self);
-        cvr::stereo::preparation::ResetList(self);
+        if (cvr::stereo::retained_geometry::Active() || cvr::stereo::constants::RegisteredTracking()) {
+            cvr::list_audit::ListReset(self,alloc);
+            cvr::stereo::retained_geometry::Reset(self);
+            cvr::stereo::native_recording::Reset(self,reinterpret_cast<uintptr_t>(_ReturnAddress()));
+            cvr::stereo::target_access::Reset(self);
+            cvr::stereo::texture_read::Reset(self);
+            cvr::stereo::buffer_read::Reset(self);
+            cvr::stereo::material_binding::Reset(self);
+            cvr::stereo::source_cbv::Reset(self);
+            cvr::stereo::source_srv::Reset(self);
+            cvr::stereo::families::Reset(self,pso);
+            cvr::stereo::constants::Reset(self);
+            cvr::stereo::constants::ResetRegistered(self);
+            cvr::stereo::preparation::ResetList(self);
+        }
         if(CyberpunkVR_NativeStereoProbeState.load(std::memory_order_relaxed)==1)
             cvr::stereo::native_probe::Reset(self,pso,e->shading_state_known);
         cvr::gpu::ResetCommandResources(self);
