@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: "4"
+
 jobs:
   build:
     name: Build & Package (Release x64)
@@ -22,30 +25,61 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Configure CMake
+      - name: Restore Build & Cargo Cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cpvr-build-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', '.gitmodules', 'cmake/**') }}-${{ github.sha }}
+          restore-keys: |
+            cpvr-build-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', '.gitmodules', 'cmake/**') }}-
+            cpvr-build-${{ runner.os }}-
+
+      - name: Configure CMake (with MSVC /MP)
         run: |
-          cmake -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="/MP" -DCMAKE_C_FLAGS="/MP"
 
       - name: Compile Mod
         run: |
           cmake --build build --config Release --parallel
 
+      - name: Save Build & Cargo Cache (Even on Failure)
+        uses: actions/cache/save@v4
+        if: always() && steps.cache-restore.outputs.cache-matched-key != steps.cache-restore.outputs.cache-primary-key
+        with:
+          path: |
+            build
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ steps.cache-restore.outputs.cache-primary-key }}
+
       - name: Package Distribution
         shell: pwsh
         run: |
-          # Localizar la DLL compilada dentro del árbol de salida
           $dllCandidates = @(
             "build\bin\red4ext\plugins\cyberpunkvrport\Release\cyberpunkvrport.dll",
             "build\bin\red4ext\plugins\cyberpunkvrport\cyberpunkvrport.dll",
-            "build\Release\cyberpunkvrport.dll"
+            "build\Release\cyberpunkvrport.dll",
+            "build\Release\cyberpunkvrport_stereo.dll"
           )
-          
+
           $foundDll = $null
           foreach ($cand in $dllCandidates) {
             if (Test-Path $cand) {
               $foundDll = $cand
               Write-Host "DLL encontrada: $foundDll" -ForegroundColor Green
               break
+            }
+          }
+
+          if (-not $foundDll) {
+            $search = Get-ChildItem -Path "build" -Recurse -Filter "cyberpunkvrport*.dll" | Select-Object -First 1
+            if ($search) {
+              $foundDll = $search.FullName
+              Write-Host "DLL localizada por busqueda: $foundDll" -ForegroundColor Green
             }
           }
 
@@ -76,5 +110,5 @@ jobs:
           name: CyberpunkVRPort-Release-x64
           path: |
             dist/*.zip
-            build/**/cyberpunkvrport.dll
+            build/**/cyberpunkvrport*.dll
           if-no-files-found: error

@@ -1,12 +1,9 @@
 [submodule "externals/RED4ext.SDK"]
-	path = externals/RED4ext.SDK
-	url = https://github.com/marklove5102/RED4ext.SDK.git
-[submodule "externals/externals/RED4ext.SDK"]
-	path = externals/externals/RED4ext.SDK
-	url = https://github.com/marklove5102/RED4ext.SDK.git
+path = externals/RED4ext.SDK
+url = https://github.com/wopss/RED4ext.SDK.git
 [submodule "externals/minhook"]
-	path = externals/minhook
-	url = https://github.com/TsudaKageyu/minhook.git
+path = externals/minhook
+url = https://github.com/TsudaKageyu/minhook.git
 [submodule "externals/wrpuppets-fbt-ik"]
-	path = externals/wrpuppets-fbt-ik
-	url = https://github.com/Syncher-source/wrpuppets-fbt-ik.git
+path = externals/wrpuppets-fbt-ik
+url = https://github.com/Syncher-source/wrpuppets-fbt-ik.git
