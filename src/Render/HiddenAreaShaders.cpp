@@ -27,7 +27,7 @@ __declspec(dllexport) CensusRecord CyberpunkVR_ShaderCensusLog[512]{};
 __declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_ShaderCensusRecording{0};   // the marker file was found
 __declspec(dllexport) std::atomic<uint64_t> CyberpunkVR_ShaderCensusPipelines{0};
 // 1 = bind the patched twins while the mask is on.
-__declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_HiddenAreaPatch{1};
+__declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_HiddenAreaPatch{0};
 __declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_HiddenAreaPatchLoaded{0};   // patched shaders found
 __declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_HiddenAreaPatchRegistered{0};   // engine pipelines with a patch
 __declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_HiddenAreaPatchBuilt{0};        // twins created
@@ -120,7 +120,7 @@ __declspec(dllexport) std::atomic<uint64_t> CyberpunkVR_ScreenFxPatchBinds{0};
 // Group 8 (stereo_merge\, tools/asym_tests/stereo_ssr_merge_shaders.py): 2.5 engine stereo only. The ambient
 // pass takes the reflections a pixel's eye lost at its inner edge from the other eye's half of the frame, where
 // the same surface was traced further (the stereo branch; the mono branch is the engine's).
-__declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_StereoMergePatch{1};
+__declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_StereoMergePatch{0};
 __declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_StereoMergePatchLoaded{0};
 __declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_StereoMergePatchBuilt{0};
 __declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_StereoMergePatchFailed{0};
@@ -178,7 +178,7 @@ __declspec(dllexport) std::atomic<uint64_t> CyberpunkVR_StereoProbeCullPatchBind
 // libraries) take the view direction from the eye instead of the stereo centre their world inverse is relative
 // to. Swapped when the state object is created (Stereo/DeviceHooks.cpp), so the switch takes effect at the next
 // creation, not live; Binds counts the state objects created with a twin.
-__declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_StereoRtPatch{1};
+__declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_StereoRtPatch{0};
 __declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_StereoRtPatchLoaded{0};
 __declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_StereoRtPatchBuilt{0};
 __declspec(dllexport) std::atomic<uint32_t> CyberpunkVR_StereoRtPatchFailed{0};
@@ -480,6 +480,8 @@ namespace { ID3D12PipelineState* CreateAlternate(Entry& e); }   // below, with t
 void Register(ID3D12PipelineState* original,const D3D12_SHADER_BYTECODE& code,Creator create) {
     const Patch* patch=PatchFor(code);
     if(!original || !patch || !create)return;
+    if(!patch->fixed && !CyberpunkVR_HiddenAreaPatch.load(std::memory_order_relaxed) && patch->fallback.empty())return;
+    if(patch->fixed && patch->alternateGroup<0 && !kFixedGroups[patch->group].enabled->load(std::memory_order_relaxed))return;
     Microsoft::WRL::ComPtr<Entry> entry;entry.Attach(new Entry);
     entry->patch=patch;entry->create=std::move(create);
     {

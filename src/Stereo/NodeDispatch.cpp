@@ -1314,12 +1314,13 @@ uint8_t __fastcall Detour_NodeDispatch(
     const uint64_t previous_view_key   = t_active_view_key;
     t_active_view_known = view_key_known;
     t_active_view_key   = view_key;
+    const bool wantNodePose = cvr::framegen::CaptureInputsEnabled() || !cvr::engine_stereo::Enabled();
     cvr::camera::PoseIdentity nodePose{};
-    if(view_key_known && (view_key==0 || view_key==g_vrcam_ctx_key.load(std::memory_order_relaxed)))
+    if(wantNodePose && view_key_known && (view_key==0 || view_key==g_vrcam_ctx_key.load(std::memory_order_relaxed)))
         cvr::camera::ReadCameraPoseIdentity(poseContext+cvr::view_layout::kCamera,view_key==0 ? 1u : 2u,&nodePose);
     if(cvr::framegen::CaptureInputsEnabled() && nodePose)
         nodePose.hasRenderFrameId=cvr::framegen::ReadRenderFrameIndex(&nodePose.renderFrameId);
-    const auto previousNodePose=cvr::camera::SetNodePoseIdentity(nodePose);
+    const auto previousNodePose=wantNodePose ? cvr::camera::SetNodePoseIdentity(nodePose) : cvr::camera::PoseIdentity{};
     // Framegen without Streamline: the camera of the view a TAA or upscaler node is about to render.
     if(cvr::framegen::CaptureInputsEnabled() && nodePose)cvr::framegen::ObserveNativeView(work_context);
     const bool fogNode=work_rva==VOLUMETRIC_FOG_NODE_RVA;
@@ -1363,9 +1364,11 @@ uint8_t __fastcall Detour_NodeDispatch(
             ((CyberpunkVR_CompLendScoped & 8u) && crva == GATE_READER_770268_RVA);
         if (wanted) comp_lent_vd = comp_lend_install(work_context, comp_saved);
     }
-    view_params_report();
-    complend_report();
-    if(view_key_known)optics_render_probe(poseContext,work_context,view_key,work_rva);
+    if (!cvr::engine_stereo::Enabled()) {
+        view_params_report();
+        complend_report();
+    }
+    if(view_key_known && cvr::optics::probe::StageRequested())optics_render_probe(poseContext,work_context,view_key,work_rva);
     // Diagnostic only: hold the existing external camera image while the
     // camera, UI and both eye renderers continue normally. Toggling the camera
     // off clears its dynamic texture and cannot isolate sampling artefacts.
@@ -1430,7 +1433,7 @@ uint8_t __fastcall Detour_NodeDispatch(
     t_view_side = previous_view_side;
     t_active_view_known = previous_view_known;
     t_active_view_key   = previous_view_key;
-    cvr::camera::SetNodePoseIdentity(previousNodePose);
+    if(wantNodePose)cvr::camera::SetNodePoseIdentity(previousNodePose);
     if(fogNode)cvr::stereo::SetFogWorkContext(previousFogContext);
     t_current_node_work = previous_node_work;
     t_current_node_view = previous_node_view;
